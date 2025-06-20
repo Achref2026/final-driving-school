@@ -6,106 +6,216 @@ const API = `${BACKEND_URL}/api`;
 
 const TeacherDashboard = ({ user, token }) => {
   const [activeTab, setActiveTab] = useState('overview');
-  const [sessions, setSessions] = useState([]);
-  const [analytics, setAnalytics] = useState(null);
-  const [quizAttempts, setQuizAttempts] = useState([]);
-  const [students, setStudents] = useState([]);
-  const [videoRooms, setVideoRooms] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  // Data states
+  const [sessions, setSessions] = useState([]);
+  const [analytics, setAnalytics] = useState(null);
+  const [teachers, setTeachers] = useState([]);
+  const [students, setStudents] = useState([]);
+  const [schoolInfo, setSchoolInfo] = useState(null);
+  const [schoolSessions, setSchoolSessions] = useState([]);
+  const [enrollments, setEnrollments] = useState([]);
+
   // Modal states
+  const [showAddTeacherModal, setShowAddTeacherModal] = useState(false);
+  const [showEditSchoolModal, setShowEditSchoolModal] = useState(false);
   const [showSessionModal, setShowSessionModal] = useState(false);
-  const [showVideoRoomModal, setShowVideoRoomModal] = useState(false);
+  const [showStudentAssignModal, setShowStudentAssignModal] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState(null);
 
   // Form states
+  const [teacherForm, setTeacherForm] = useState({
+    email: '',
+    first_name: '',
+    last_name: '',
+    phone: '',
+    address: '',
+    date_of_birth: '',
+    gender: 'male',
+    password: '',
+    can_teach_male: true,
+    can_teach_female: true
+  });
+
+  const [schoolForm, setSchoolForm] = useState({
+    name: '',
+    address: '',
+    state: '',
+    phone: '',
+    email: '',
+    description: '',
+    price: 0
+  });
+
   const [sessionForm, setSessionForm] = useState({
     student_id: '',
-    course_id: '',
+    teacher_id: '',
     session_type: 'theory',
     scheduled_at: '',
     duration_minutes: 60,
     location: ''
   });
 
-  const [videoRoomForm, setVideoRoomForm] = useState({
-    student_id: '',
-    course_id: '',
-    scheduled_at: '',
-    duration_minutes: 60
-  });
+  const [states] = useState([
+    "Adrar", "Chlef", "Laghouat", "Oum El Bouaghi", "Batna", "Béjaïa", "Biskra", 
+    "Béchar", "Blida", "Bouira", "Tamanrasset", "Tébessa", "Tlemcen", "Tiaret", 
+    "Tizi Ouzou", "Alger", "Djelfa", "Jijel", "Sétif", "Saïda", "Skikda", 
+    "Sidi Bel Abbès", "Annaba", "Guelma", "Constantine", "Médéa", "Mostaganem", 
+    "M'Sila", "Mascara", "Ouargla", "Oran", "El Bayadh", "Illizi", 
+    "Bordj Bou Arréridj", "Boumerdès", "El Tarf", "Tindouf", "Tissemsilt", 
+    "El Oued", "Khenchela", "Souk Ahras", "Tipaza", "Mila", "Aïn Defla", 
+    "Naâma", "Aïn Témouchent", "Ghardaïa", "Relizane"
+  ]);
 
   useEffect(() => {
-    fetchTeacherData();
+    fetchAllData();
   }, [user]);
 
-  const fetchTeacherData = async () => {
+  const fetchAllData = async () => {
     try {
       setLoading(true);
       const headers = { Authorization: `Bearer ${token}` };
 
-      // Fetch teacher sessions
-      const sessionsResponse = await axios.get(`${API}/sessions/my`, { headers });
-      setSessions(sessionsResponse.data.sessions || []);
+      // Fetch all data in parallel
+      const [
+        sessionsRes,
+        teachersRes,
+        studentsRes,
+        schoolInfoRes,
+        schoolSessionsRes,
+        enrollmentsRes
+      ] = await Promise.allSettled([
+        axios.get(`${API}/sessions/my`, { headers }),
+        axios.get(`${API}/teachers/my`, { headers }),
+        axios.get(`${API}/manager/enrollments`, { headers }),
+        axios.get(`${API}/dashboard`, { headers }),
+        axios.get(`${API}/sessions/school`, { headers }),
+        axios.get(`${API}/manager/enrollments`, { headers })
+      ]);
 
-      // Fetch video rooms
-      try {
-        const videoRoomsResponse = await axios.get(`${API}/video-rooms/my`, { headers });
-        setVideoRooms(videoRoomsResponse.data || []);
-      } catch (videoError) {
-        console.log('Video rooms endpoint not available:', videoError);
-        setVideoRooms([]);
+      // Handle sessions
+      if (sessionsRes.status === 'fulfilled') {
+        setSessions(sessionsRes.value.data.sessions || []);
       }
 
-      // Fetch teacher analytics
-      try {
-        const analyticsResponse = await axios.get(`${API}/analytics/teacher-performance/${user.id}`, { headers });
-        setAnalytics(analyticsResponse.data);
-      } catch (analyticsError) {
-        console.log('Analytics not available:', analyticsError);
-        setAnalytics({
-          total_sessions: sessions.length,
-          completed_sessions: sessions.filter(s => s.status === 'completed').length,
-          rating: user.rating || 0,
-          total_students: 0
-        });
+      // Handle teachers
+      if (teachersRes.status === 'fulfilled') {
+        setTeachers(teachersRes.value.data.teachers || []);
       }
 
-      // Fetch assigned students
-      try {
-        const studentsResponse = await axios.get(`${API}/teacher/students`, { headers });
-        setStudents(studentsResponse.data.students || []);
-      } catch (studentsError) {
-        console.log('Students endpoint not available:', studentsError);
-        setStudents([]);
+      // Handle students (from enrollments)
+      if (studentsRes.status === 'fulfilled') {
+        const enrollmentData = studentsRes.value.data.enrollments || [];
+        setEnrollments(enrollmentData);
+        
+        // Extract students from enrollments
+        const studentList = enrollmentData.map(enrollment => ({
+          id: enrollment.student_id,
+          name: enrollment.student_name,
+          email: enrollment.student_email,
+          phone: enrollment.student_phone,
+          enrollment_id: enrollment.id,
+          enrollment_status: enrollment.enrollment_status,
+          documents_verified: enrollment.documents_verified
+        }));
+        setStudents(studentList);
       }
+
+      // Handle school info
+      if (schoolInfoRes.status === 'fulfilled') {
+        const dashboardData = schoolInfoRes.value.data;
+        if (dashboardData.user_school) {
+          setSchoolInfo(dashboardData.user_school);
+          setSchoolForm({
+            name: dashboardData.user_school.name || '',
+            address: dashboardData.user_school.address || '',
+            state: dashboardData.user_school.state || '',
+            phone: dashboardData.user_school.phone || '',
+            email: dashboardData.user_school.email || '',
+            description: dashboardData.user_school.description || '',
+            price: dashboardData.user_school.price || 0
+          });
+        }
+      }
+
+      // Handle school sessions
+      if (schoolSessionsRes.status === 'fulfilled') {
+        setSchoolSessions(schoolSessionsRes.value.data.sessions || []);
+      }
+
+      // Set basic analytics
+      setAnalytics({
+        total_sessions: sessions.length,
+        completed_sessions: sessions.filter(s => s.status === 'completed').length,
+        total_students: students.length,
+        total_teachers: teachers.length
+      });
 
     } catch (error) {
-      console.error('Error fetching teacher data:', error);
+      console.error('Error fetching data:', error);
       setError('Failed to load dashboard data');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCompleteSession = async (sessionId) => {
+  const handleAddTeacher = async (e) => {
+    e.preventDefault();
     try {
       const headers = { Authorization: `Bearer ${token}` };
-      await axios.post(`${API}/sessions/${sessionId}/complete`, {}, { headers });
+      const response = await axios.post(`${API}/teachers/add`, teacherForm, { headers });
       
-      setSessions(prev => 
-        prev.map(session => 
-          session.id === sessionId 
-            ? { ...session, status: 'completed' }
-            : session
-        )
-      );
+      setTeachers(prev => [...prev, response.data]);
+      setShowAddTeacherModal(false);
+      setTeacherForm({
+        email: '',
+        first_name: '',
+        last_name: '',
+        phone: '',
+        address: '',
+        date_of_birth: '',
+        gender: 'male',
+        password: '',
+        can_teach_male: true,
+        can_teach_female: true
+      });
       
-      alert('Session completed successfully!');
+      alert('Teacher added successfully!');
     } catch (error) {
-      console.error('Error completing session:', error);
-      alert('Failed to complete session');
+      console.error('Error adding teacher:', error);
+      alert(error.response?.data?.detail || 'Failed to add teacher');
+    }
+  };
+
+  const handleRemoveTeacher = async (teacherId) => {
+    if (!window.confirm('Are you sure you want to remove this teacher?')) return;
+    
+    try {
+      const headers = { Authorization: `Bearer ${token}` };
+      await axios.delete(`${API}/teachers/${teacherId}`, { headers });
+      
+      setTeachers(prev => prev.filter(t => t.id !== teacherId));
+      alert('Teacher removed successfully!');
+    } catch (error) {
+      console.error('Error removing teacher:', error);
+      alert(error.response?.data?.detail || 'Failed to remove teacher');
+    }
+  };
+
+  const handleUpdateSchool = async (e) => {
+    e.preventDefault();
+    try {
+      const headers = { Authorization: `Bearer ${token}` };
+      const response = await axios.put(`${API}/driving-schools/${schoolInfo.id}`, schoolForm, { headers });
+      
+      setSchoolInfo(response.data);
+      setShowEditSchoolModal(false);
+      alert('School information updated successfully!');
+    } catch (error) {
+      console.error('Error updating school:', error);
+      alert(error.response?.data?.detail || 'Failed to update school information');
     }
   };
 
@@ -115,11 +225,11 @@ const TeacherDashboard = ({ user, token }) => {
       const headers = { Authorization: `Bearer ${token}` };
       const response = await axios.post(`${API}/sessions/schedule`, sessionForm, { headers });
       
-      setSessions(prev => [...prev, response.data]);
+      setSchoolSessions(prev => [...prev, response.data]);
       setShowSessionModal(false);
       setSessionForm({
         student_id: '',
-        course_id: '',
+        teacher_id: '',
         session_type: 'theory',
         scheduled_at: '',
         duration_minutes: 60,
@@ -129,29 +239,7 @@ const TeacherDashboard = ({ user, token }) => {
       alert('Session scheduled successfully!');
     } catch (error) {
       console.error('Error scheduling session:', error);
-      alert('Failed to schedule session');
-    }
-  };
-
-  const handleCreateVideoRoom = async (e) => {
-    e.preventDefault();
-    try {
-      const headers = { Authorization: `Bearer ${token}` };
-      const response = await axios.post(`${API}/video-rooms`, videoRoomForm, { headers });
-      
-      setVideoRooms(prev => [...prev, response.data]);
-      setShowVideoRoomModal(false);
-      setVideoRoomForm({
-        student_id: '',
-        course_id: '',
-        scheduled_at: '',
-        duration_minutes: 60
-      });
-      
-      alert(`Online theory session created successfully! Room URL: ${response.data.room_url}`);
-    } catch (error) {
-      console.error('Error creating video room:', error);
-      alert('Failed to create video room');
+      alert(error.response?.data?.detail || 'Failed to schedule session');
     }
   };
 
@@ -161,6 +249,9 @@ const TeacherDashboard = ({ user, token }) => {
       case 'scheduled': return 'bg-primary';
       case 'in_progress': return 'bg-warning';
       case 'cancelled': return 'bg-danger';
+      case 'approved': return 'bg-success';
+      case 'pending_approval': return 'bg-warning';
+      case 'rejected': return 'bg-danger';
       default: return 'bg-secondary';
     }
   };
@@ -204,11 +295,11 @@ const TeacherDashboard = ({ user, token }) => {
               Schedule Session
             </button>
             <button
-              onClick={() => setShowVideoRoomModal(true)}
+              onClick={() => setShowAddTeacherModal(true)}
               className="btn btn-success"
             >
-              <i className="fas fa-video me-2"></i>
-              Create Online Course
+              <i className="fas fa-user-plus me-2"></i>
+              Add Teacher
             </button>
           </div>
         </div>
@@ -225,18 +316,10 @@ const TeacherDashboard = ({ user, token }) => {
           </li>
           <li className="nav-item">
             <button
-              className={`nav-link ${activeTab === 'sessions' ? 'active' : ''}`}
-              onClick={() => setActiveTab('sessions')}
+              className={`nav-link ${activeTab === 'teachers' ? 'active' : ''}`}
+              onClick={() => setActiveTab('teachers')}
             >
-              <i className="fas fa-calendar me-2"></i>My Sessions ({sessions.length})
-            </button>
-          </li>
-          <li className="nav-item">
-            <button
-              className={`nav-link ${activeTab === 'online-courses' ? 'active' : ''}`}
-              onClick={() => setActiveTab('online-courses')}
-            >
-              <i className="fas fa-video me-2"></i>Online Courses ({videoRooms.length})
+              <i className="fas fa-chalkboard-teacher me-2"></i>Manage Teachers ({teachers.length})
             </button>
           </li>
           <li className="nav-item">
@@ -244,15 +327,31 @@ const TeacherDashboard = ({ user, token }) => {
               className={`nav-link ${activeTab === 'students' ? 'active' : ''}`}
               onClick={() => setActiveTab('students')}
             >
-              <i className="fas fa-users me-2"></i>My Students ({students.length})
+              <i className="fas fa-users me-2"></i>Manage Students ({students.length})
             </button>
           </li>
           <li className="nav-item">
             <button
-              className={`nav-link ${activeTab === 'performance' ? 'active' : ''}`}
-              onClick={() => setActiveTab('performance')}
+              className={`nav-link ${activeTab === 'school-info' ? 'active' : ''}`}
+              onClick={() => setActiveTab('school-info')}
             >
-              <i className="fas fa-chart-bar me-2"></i>Performance
+              <i className="fas fa-school me-2"></i>School Info
+            </button>
+          </li>
+          <li className="nav-item">
+            <button
+              className={`nav-link ${activeTab === 'analytics' ? 'active' : ''}`}
+              onClick={() => setActiveTab('analytics')}
+            >
+              <i className="fas fa-chart-bar me-2"></i>Analytics
+            </button>
+          </li>
+          <li className="nav-item">
+            <button
+              className={`nav-link ${activeTab === 'schedules' ? 'active' : ''}`}
+              onClick={() => setActiveTab('schedules')}
+            >
+              <i className="fas fa-calendar me-2"></i>Schedules ({schoolSessions.length})
             </button>
           </li>
         </ul>
@@ -266,11 +365,11 @@ const TeacherDashboard = ({ user, token }) => {
                 <div className="card-body">
                   <div className="d-flex justify-content-between">
                     <div>
-                      <div className="h4 mb-0">{sessions.length}</div>
-                      <div className="small">Total Sessions</div>
+                      <div className="h4 mb-0">{teachers.length}</div>
+                      <div className="small">Total Teachers</div>
                     </div>
                     <div className="h1 opacity-50">
-                      <i className="fas fa-calendar"></i>
+                      <i className="fas fa-chalkboard-teacher"></i>
                     </div>
                   </div>
                 </div>
@@ -282,13 +381,11 @@ const TeacherDashboard = ({ user, token }) => {
                 <div className="card-body">
                   <div className="d-flex justify-content-between">
                     <div>
-                      <div className="h4 mb-0">
-                        {sessions.filter(s => s.status === 'completed').length}
-                      </div>
-                      <div className="small">Completed Sessions</div>
+                      <div className="h4 mb-0">{students.length}</div>
+                      <div className="small">Total Students</div>
                     </div>
                     <div className="h1 opacity-50">
-                      <i className="fas fa-check-circle"></i>
+                      <i className="fas fa-users"></i>
                     </div>
                   </div>
                 </div>
@@ -300,11 +397,11 @@ const TeacherDashboard = ({ user, token }) => {
                 <div className="card-body">
                   <div className="d-flex justify-content-between">
                     <div>
-                      <div className="h4 mb-0">{students.length}</div>
-                      <div className="small">Active Students</div>
+                      <div className="h4 mb-0">{schoolSessions.length}</div>
+                      <div className="small">Total Sessions</div>
                     </div>
                     <div className="h1 opacity-50">
-                      <i className="fas fa-users"></i>
+                      <i className="fas fa-calendar"></i>
                     </div>
                   </div>
                 </div>
@@ -316,8 +413,8 @@ const TeacherDashboard = ({ user, token }) => {
                 <div className="card-body">
                   <div className="d-flex justify-content-between">
                     <div>
-                      <div className="h4 mb-0">{analytics?.rating || 0}/5</div>
-                      <div className="small">Teacher Rating</div>
+                      <div className="h4 mb-0">{schoolInfo?.rating || 0}/5</div>
+                      <div className="small">School Rating</div>
                     </div>
                     <div className="h1 opacity-50">
                       <i className="fas fa-star"></i>
@@ -327,11 +424,11 @@ const TeacherDashboard = ({ user, token }) => {
               </div>
             </div>
 
-            {/* Upcoming Sessions */}
+            {/* Recent Activity */}
             <div className="col-12">
               <div className="card">
                 <div className="card-header">
-                  <h5 className="card-title mb-0">Upcoming Sessions</h5>
+                  <h5 className="card-title mb-0">Recent Sessions</h5>
                 </div>
                 <div className="card-body">
                   <div className="table-responsive">
@@ -339,41 +436,27 @@ const TeacherDashboard = ({ user, token }) => {
                       <thead>
                         <tr>
                           <th>Student</th>
-                          <th>Session Type</th>
+                          <th>Teacher</th>
+                          <th>Type</th>
                           <th>Date & Time</th>
-                          <th>Duration</th>
                           <th>Status</th>
-                          <th>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {sessions
-                          .filter(s => s.status === 'scheduled' || s.status === 'in_progress')
-                          .slice(0, 5)
-                          .map((session) => (
+                        {schoolSessions.slice(0, 5).map((session) => (
                           <tr key={session.id}>
                             <td>{session.student_name || 'Student'}</td>
+                            <td>{session.teacher_name || 'Teacher'}</td>
                             <td>
                               <span className={`badge ${getSessionTypeColor(session.session_type)}`}>
                                 {session.session_type?.toUpperCase()}
                               </span>
                             </td>
                             <td>{new Date(session.scheduled_at).toLocaleString()}</td>
-                            <td>{session.duration_minutes} min</td>
                             <td>
                               <span className={`badge ${getStatusBadgeClass(session.status)}`}>
                                 {session.status?.toUpperCase()}
                               </span>
-                            </td>
-                            <td>
-                              {session.status === 'scheduled' && (
-                                <button
-                                  onClick={() => handleCompleteSession(session.id)}
-                                  className="btn btn-sm btn-success"
-                                >
-                                  Complete
-                                </button>
-                              )}
                             </td>
                           </tr>
                         ))}
@@ -386,15 +469,15 @@ const TeacherDashboard = ({ user, token }) => {
           </div>
         )}
 
-        {activeTab === 'sessions' && (
+        {activeTab === 'teachers' && (
           <div className="card">
             <div className="card-header d-flex justify-content-between align-items-center">
-              <h5 className="card-title mb-0">All Sessions</h5>
+              <h5 className="card-title mb-0">Manage Teachers</h5>
               <button
-                onClick={() => setShowSessionModal(true)}
+                onClick={() => setShowAddTeacherModal(true)}
                 className="btn btn-primary"
               >
-                <i className="fas fa-calendar-plus me-2"></i>Schedule New Session
+                <i className="fas fa-user-plus me-2"></i>Add New Teacher
               </button>
             </div>
             <div className="card-body">
@@ -402,44 +485,60 @@ const TeacherDashboard = ({ user, token }) => {
                 <table className="table table-hover">
                   <thead>
                     <tr>
-                      <th>Student</th>
-                      <th>Session Type</th>
-                      <th>Date & Time</th>
-                      <th>Duration</th>
-                      <th>Location</th>
+                      <th>Name</th>
+                      <th>Email</th>
+                      <th>Phone</th>
+                      <th>Gender Restrictions</th>
+                      <th>Rating</th>
                       <th>Status</th>
                       <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {sessions.map((session) => (
-                      <tr key={session.id}>
-                        <td>{session.student_name || 'Student'}</td>
+                    {teachers.map((teacher) => (
+                      <tr key={teacher.id}>
                         <td>
-                          <span className={`badge ${getSessionTypeColor(session.session_type)}`}>
-                            {session.session_type?.toUpperCase()}
-                          </span>
+                          <div className="d-flex align-items-center">
+                            <div className="avatar bg-primary text-white rounded-circle me-3" style={{ width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              {teacher.user_details?.first_name?.charAt(0) || 'T'}
+                            </div>
+                            <div>
+                              <div className="fw-bold">{teacher.user_details?.first_name} {teacher.user_details?.last_name}</div>
+                            </div>
+                          </div>
                         </td>
-                        <td>{new Date(session.scheduled_at).toLocaleString()}</td>
-                        <td>{session.duration_minutes} min</td>
-                        <td>{session.location || 'N/A'}</td>
+                        <td>{teacher.user_details?.email}</td>
+                        <td>{teacher.user_details?.phone}</td>
                         <td>
-                          <span className={`badge ${getStatusBadgeClass(session.status)}`}>
-                            {session.status?.toUpperCase()}
+                          <div className="d-flex gap-1">
+                            {teacher.can_teach_male && <span className="badge bg-info">Male</span>}
+                            {teacher.can_teach_female && <span className="badge bg-pink">Female</span>}
+                          </div>
+                        </td>
+                        <td>
+                          <div className="d-flex align-items-center">
+                            <span className="text-warning me-1">★</span>
+                            {teacher.rating || 0}/5
+                          </div>
+                        </td>
+                        <td>
+                          <span className={`badge ${teacher.is_approved ? 'bg-success' : 'bg-warning'}`}>
+                            {teacher.is_approved ? 'Approved' : 'Pending'}
                           </span>
                         </td>
                         <td>
                           <div className="btn-group btn-group-sm">
-                            {session.status === 'scheduled' && (
-                              <button
-                                onClick={() => handleCompleteSession(session.id)}
-                                className="btn btn-success"
-                              >
-                                Complete
-                              </button>
-                            )}
                             <button className="btn btn-outline-primary">
                               <i className="fas fa-eye"></i>
+                            </button>
+                            <button className="btn btn-outline-secondary">
+                              <i className="fas fa-edit"></i>
+                            </button>
+                            <button 
+                              className="btn btn-outline-danger"
+                              onClick={() => handleRemoveTeacher(teacher.id)}
+                            >
+                              <i className="fas fa-trash"></i>
                             </button>
                           </div>
                         </td>
@@ -452,173 +551,195 @@ const TeacherDashboard = ({ user, token }) => {
           </div>
         )}
 
-        {activeTab === 'online-courses' && (
-          <div className="card">
-            <div className="card-header d-flex justify-content-between align-items-center">
-              <h5 className="card-title mb-0">Online Theory Courses</h5>
-              <button
-                onClick={() => setShowVideoRoomModal(true)}
-                className="btn btn-success"
-              >
-                <i className="fas fa-video me-2"></i>Create New Online Course
-              </button>
-            </div>
-            <div className="card-body">
-              {videoRooms.length > 0 ? (
-                <div className="table-responsive">
-                  <table className="table table-hover">
-                    <thead>
-                      <tr>
-                        <th>Student</th>
-                        <th>Course</th>
-                        <th>Scheduled Date</th>
-                        <th>Duration</th>
-                        <th>Status</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {videoRooms.map((room) => (
-                        <tr key={room.id}>
-                          <td>{room.student_name || 'Student'}</td>
-                          <td>
-                            <span className="badge bg-info">
-                              THEORY COURSE
-                            </span>
-                          </td>
-                          <td>{new Date(room.scheduled_at).toLocaleString()}</td>
-                          <td>{room.duration_minutes} min</td>
-                          <td>
-                            <span className={`badge ${room.is_active ? 'bg-success' : 'bg-secondary'}`}>
-                              {room.is_active ? 'ACTIVE' : 'COMPLETED'}
-                            </span>
-                          </td>
-                          <td>
-                            <div className="btn-group btn-group-sm">
-                              {room.is_active && (
-                                <a
-                                  href={room.room_url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="btn btn-primary"
-                                >
-                                  <i className="fas fa-video me-1"></i>Join Room
-                                </a>
-                              )}
-                              <button className="btn btn-outline-secondary">
-                                <i className="fas fa-eye"></i>
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <div className="text-center py-5">
-                  <i className="fas fa-video fa-4x text-muted mb-4"></i>
-                  <h5>No Online Courses Created</h5>
-                  <p className="text-muted">Create online theory courses to teach students remotely using video calls</p>
-                  <button
-                    onClick={() => setShowVideoRoomModal(true)}
-                    className="btn btn-success"
-                  >
-                    <i className="fas fa-video me-2"></i>Create First Online Course
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
         {activeTab === 'students' && (
           <div className="card">
             <div className="card-header">
-              <h5 className="card-title mb-0">My Students</h5>
+              <h5 className="card-title mb-0">Manage Students</h5>
             </div>
             <div className="card-body">
-              <div className="row g-4">
-                {students.map((student) => (
-                  <div key={student.id} className="col-md-6 col-lg-4">
-                    <div className="card h-100">
-                      <div className="card-body text-center">
-                        <div className="avatar bg-primary text-white rounded-circle mx-auto mb-3 d-flex align-items-center justify-content-center" style={{ width: '60px', height: '60px', fontSize: '1.5rem' }}>
-                          {student.name?.charAt(0) || 'S'}
-                        </div>
-                        <h6 className="card-title">{student.name}</h6>
-                        <p className="text-muted small mb-2">{student.email}</p>
-                        
-                        <div className="mb-3">
-                          <div className="text-muted small">
-                            Progress: {student.progress || 0}%
+              <div className="table-responsive">
+                <table className="table table-hover">
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Email</th>
+                      <th>Phone</th>
+                      <th>Enrollment Status</th>
+                      <th>Documents</th>
+                      <th>Assigned Teacher</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {students.map((student) => (
+                      <tr key={student.id}>
+                        <td>
+                          <div className="d-flex align-items-center">
+                            <div className="avatar bg-info text-white rounded-circle me-3" style={{ width: '40px', height: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              {student.name?.charAt(0) || 'S'}
+                            </div>
+                            <div>
+                              <div className="fw-bold">{student.name}</div>
+                            </div>
                           </div>
-                          <div className="progress mt-1" style={{ height: '4px' }}>
-                            <div
-                              className="progress-bar bg-primary"
-                              style={{ width: `${student.progress || 0}%` }}
-                            ></div>
+                        </td>
+                        <td>{student.email}</td>
+                        <td>{student.phone}</td>
+                        <td>
+                          <span className={`badge ${getStatusBadgeClass(student.enrollment_status)}`}>
+                            {student.enrollment_status?.replace('_', ' ').toUpperCase()}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={`badge ${student.documents_verified ? 'bg-success' : 'bg-warning'}`}>
+                            {student.documents_verified ? 'Verified' : 'Pending'}
+                          </span>
+                        </td>
+                        <td>
+                          <select className="form-select form-select-sm">
+                            <option value="">Assign Teacher</option>
+                            {teachers.filter(t => t.is_approved).map(teacher => (
+                              <option key={teacher.id} value={teacher.id}>
+                                {teacher.user_details?.first_name} {teacher.user_details?.last_name}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td>
+                          <div className="btn-group btn-group-sm">
+                            <button className="btn btn-outline-primary">
+                              <i className="fas fa-eye"></i>
+                            </button>
+                            <button className="btn btn-outline-success">
+                              <i className="fas fa-calendar"></i>
+                            </button>
                           </div>
-                        </div>
-                        
-                        <div className="d-grid gap-2">
-                          <button className="btn btn-outline-primary btn-sm">
-                            <i className="fas fa-calendar me-2"></i>Schedule Session
-                          </button>
-                          <button className="btn btn-outline-secondary btn-sm">
-                            <i className="fas fa-chart-line me-2"></i>View Progress
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-                
-                {students.length === 0 && (
-                  <div className="col-12">
-                    <div className="text-center py-5">
-                      <i className="fas fa-users fa-4x text-muted mb-4"></i>
-                      <h5>No Students Assigned</h5>
-                      <p className="text-muted">Students will appear here once they are enrolled in your courses</p>
-                    </div>
-                  </div>
-                )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>
         )}
 
-        {activeTab === 'performance' && analytics && (
+        {activeTab === 'school-info' && schoolInfo && (
+          <div className="row g-4">
+            <div className="col-lg-8">
+              <div className="card">
+                <div className="card-header d-flex justify-content-between align-items-center">
+                  <h5 className="card-title mb-0">School Information</h5>
+                  <button
+                    onClick={() => setShowEditSchoolModal(true)}
+                    className="btn btn-primary"
+                  >
+                    <i className="fas fa-edit me-2"></i>Edit School Info
+                  </button>
+                </div>
+                <div className="card-body">
+                  <div className="row">
+                    <div className="col-md-6">
+                      <div className="mb-3">
+                        <label className="form-label fw-bold">School Name</label>
+                        <p className="form-control-plaintext">{schoolInfo.name}</p>
+                      </div>
+                      <div className="mb-3">
+                        <label className="form-label fw-bold">Address</label>
+                        <p className="form-control-plaintext">{schoolInfo.address}</p>
+                      </div>
+                      <div className="mb-3">
+                        <label className="form-label fw-bold">State</label>
+                        <p className="form-control-plaintext">{schoolInfo.state}</p>
+                      </div>
+                    </div>
+                    <div className="col-md-6">
+                      <div className="mb-3">
+                        <label className="form-label fw-bold">Phone</label>
+                        <p className="form-control-plaintext">{schoolInfo.phone}</p>
+                      </div>
+                      <div className="mb-3">
+                        <label className="form-label fw-bold">Email</label>
+                        <p className="form-control-plaintext">{schoolInfo.email}</p>
+                      </div>
+                      <div className="mb-3">
+                        <label className="form-label fw-bold">Price</label>
+                        <p className="form-control-plaintext">{schoolInfo.price} DA</p>
+                      </div>
+                    </div>
+                    <div className="col-12">
+                      <div className="mb-3">
+                        <label className="form-label fw-bold">Description</label>
+                        <p className="form-control-plaintext">{schoolInfo.description}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div className="col-lg-4">
+              <div className="card">
+                <div className="card-header">
+                  <h6 className="card-title mb-0">School Statistics</h6>
+                </div>
+                <div className="card-body">
+                  <div className="d-flex justify-content-between align-items-center mb-3">
+                    <span>Rating</span>
+                    <div className="d-flex align-items-center">
+                      <span className="text-warning me-1">★</span>
+                      {schoolInfo.rating || 0}/5
+                    </div>
+                  </div>
+                  <div className="d-flex justify-content-between align-items-center mb-3">
+                    <span>Total Reviews</span>
+                    <span className="fw-bold">{schoolInfo.total_reviews || 0}</span>
+                  </div>
+                  <div className="d-flex justify-content-between align-items-center mb-3">
+                    <span>Teachers</span>
+                    <span className="fw-bold">{teachers.length}</span>
+                  </div>
+                  <div className="d-flex justify-content-between align-items-center">
+                    <span>Students</span>
+                    <span className="fw-bold">{students.length}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'analytics' && (
           <div className="row g-4">
             <div className="col-md-6">
               <div className="card">
                 <div className="card-header">
-                  <h6 className="card-title mb-0">Teaching Performance</h6>
+                  <h6 className="card-title mb-0">Performance Overview</h6>
                 </div>
                 <div className="card-body">
                   <div className="row g-3">
                     <div className="col-6">
-                      <div className="metric">
-                        <div className="metric-value h4 mb-0">{analytics.total_sessions || 0}</div>
-                        <div className="metric-label text-muted">Total Sessions</div>
+                      <div className="metric text-center">
+                        <div className="metric-value h3 mb-0 text-primary">{teachers.length}</div>
+                        <div className="metric-label text-muted">Teachers</div>
                       </div>
                     </div>
                     <div className="col-6">
-                      <div className="metric">
-                        <div className="metric-value h4 mb-0">{analytics.completed_sessions || 0}</div>
-                        <div className="metric-label text-muted">Completed</div>
-                      </div>
-                    </div>
-                    <div className="col-6">
-                      <div className="metric">
-                        <div className="metric-value h4 mb-0">{analytics.rating || 0}/5</div>
-                        <div className="metric-label text-muted">Rating</div>
-                      </div>
-                    </div>
-                    <div className="col-6">
-                      <div className="metric">
-                        <div className="metric-value h4 mb-0">{analytics.total_students || 0}</div>
+                      <div className="metric text-center">
+                        <div className="metric-value h3 mb-0 text-success">{students.length}</div>
                         <div className="metric-label text-muted">Students</div>
+                      </div>
+                    </div>
+                    <div className="col-6">
+                      <div className="metric text-center">
+                        <div className="metric-value h3 mb-0 text-info">{schoolSessions.length}</div>
+                        <div className="metric-label text-muted">Sessions</div>
+                      </div>
+                    </div>
+                    <div className="col-6">
+                      <div className="metric text-center">
+                        <div className="metric-value h3 mb-0 text-warning">{schoolInfo?.rating || 0}/5</div>
+                        <div className="metric-label text-muted">Rating</div>
                       </div>
                     </div>
                   </div>
@@ -629,21 +750,20 @@ const TeacherDashboard = ({ user, token }) => {
             <div className="col-md-6">
               <div className="card">
                 <div className="card-header">
-                  <h6 className="card-title mb-0">Session Types</h6>
+                  <h6 className="card-title mb-0">Session Distribution</h6>
                 </div>
                 <div className="card-body">
-                  <div className="session-stats">
+                  <div className="session-types">
                     {['theory', 'park', 'road'].map((type) => {
-                      const typeSessions = sessions.filter(s => s.session_type === type);
-                      const completed = typeSessions.filter(s => s.status === 'completed').length;
-                      const total = typeSessions.length;
-                      const percentage = total > 0 ? (completed / total) * 100 : 0;
+                      const typeSessions = schoolSessions.filter(s => s.session_type === type);
+                      const total = schoolSessions.length;
+                      const percentage = total > 0 ? (typeSessions.length / total) * 100 : 0;
                       
                       return (
                         <div key={type} className="d-flex justify-content-between align-items-center mb-3">
                           <div>
                             <div className="fw-bold text-capitalize">{type}</div>
-                            <div className="small text-muted">{completed}/{total} completed</div>
+                            <div className="small text-muted">{typeSessions.length} sessions</div>
                           </div>
                           <div className="text-end">
                             <div className="h6 mb-0">{Math.round(percentage)}%</div>
@@ -661,9 +781,375 @@ const TeacherDashboard = ({ user, token }) => {
                 </div>
               </div>
             </div>
+
+            <div className="col-12">
+              <div className="card">
+                <div className="card-header">
+                  <h6 className="card-title mb-0">Enrollment Status Distribution</h6>
+                </div>
+                <div className="card-body">
+                  <div className="row">
+                    <div className="col-md-3">
+                      <div className="stat-card text-center p-3 bg-success bg-opacity-10 rounded">
+                        <div className="stat-number h4 mb-0 text-success">
+                          {students.filter(s => s.enrollment_status === 'approved').length}
+                        </div>
+                        <div className="stat-label text-muted">Approved</div>
+                      </div>
+                    </div>
+                    <div className="col-md-3">
+                      <div className="stat-card text-center p-3 bg-warning bg-opacity-10 rounded">
+                        <div className="stat-number h4 mb-0 text-warning">
+                          {students.filter(s => s.enrollment_status === 'pending_approval').length}
+                        </div>
+                        <div className="stat-label text-muted">Pending</div>
+                      </div>
+                    </div>
+                    <div className="col-md-3">
+                      <div className="stat-card text-center p-3 bg-info bg-opacity-10 rounded">
+                        <div className="stat-number h4 mb-0 text-info">
+                          {students.filter(s => s.documents_verified).length}
+                        </div>
+                        <div className="stat-label text-muted">Verified Docs</div>
+                      </div>
+                    </div>
+                    <div className="col-md-3">
+                      <div className="stat-card text-center p-3 bg-primary bg-opacity-10 rounded">
+                        <div className="stat-number h4 mb-0 text-primary">
+                          {teachers.filter(t => t.is_approved).length}
+                        </div>
+                        <div className="stat-label text-muted">Active Teachers</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'schedules' && (
+          <div className="card">
+            <div className="card-header d-flex justify-content-between align-items-center">
+              <h5 className="card-title mb-0">Schedule Management</h5>
+              <button
+                onClick={() => setShowSessionModal(true)}
+                className="btn btn-primary"
+              >
+                <i className="fas fa-calendar-plus me-2"></i>Schedule New Session
+              </button>
+            </div>
+            <div className="card-body">
+              <div className="table-responsive">
+                <table className="table table-hover">
+                  <thead>
+                    <tr>
+                      <th>Student</th>
+                      <th>Teacher</th>
+                      <th>Session Type</th>
+                      <th>Date & Time</th>
+                      <th>Duration</th>
+                      <th>Location</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {schoolSessions.map((session) => (
+                      <tr key={session.id}>
+                        <td>{session.student_name || 'Student'}</td>
+                        <td>{session.teacher_name || 'Teacher'}</td>
+                        <td>
+                          <span className={`badge ${getSessionTypeColor(session.session_type)}`}>
+                            {session.session_type?.toUpperCase()}
+                          </span>
+                        </td>
+                        <td>{new Date(session.scheduled_at).toLocaleString()}</td>
+                        <td>{session.duration_minutes} min</td>
+                        <td>{session.location || 'N/A'}</td>
+                        <td>
+                          <span className={`badge ${getStatusBadgeClass(session.status)}`}>
+                            {session.status?.toUpperCase()}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="btn-group btn-group-sm">
+                            <button className="btn btn-outline-primary">
+                              <i className="fas fa-eye"></i>
+                            </button>
+                            <button className="btn btn-outline-secondary">
+                              <i className="fas fa-edit"></i>
+                            </button>
+                            <button className="btn btn-outline-danger">
+                              <i className="fas fa-times"></i>
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         )}
       </div>
+
+      {/* Add Teacher Modal */}
+      {showAddTeacherModal && (
+        <div className="modal show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog modal-lg">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title">Add New Teacher</h5>
+                <button
+                  type="button"
+                  className="btn-close"
+                  onClick={() => setShowAddTeacherModal(false)}
+                ></button>
+              </div>
+              <form onSubmit={handleAddTeacher}>
+                <div className="modal-body">
+                  <div className="row g-3">
+                    <div className="col-md-6">
+                      <label className="form-label">Email *</label>
+                      <input
+                        type="email"
+                        className="form-control"
+                        value={teacherForm.email}
+                        onChange={(e) => setTeacherForm(prev => ({ ...prev, email: e.target.value }))}
+                        required
+                      />
+                    </div>
+                    <div className="col-md-6">
+                      <label className="form-label">Password *</label>
+                      <input
+                        type="password"
+                        className="form-control"
+                        value={teacherForm.password}
+                        onChange={(e) => setTeacherForm(prev => ({ ...prev, password: e.target.value }))}
+                        required
+                      />
+                    </div>
+                    <div className="col-md-6">
+                      <label className="form-label">First Name *</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        value={teacherForm.first_name}
+                        onChange={(e) => setTeacherForm(prev => ({ ...prev, first_name: e.target.value }))}
+                        required
+                      />
+                    </div>
+                    <div className="col-md-6">
+                      <label className="form-label">Last Name *</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        value={teacherForm.last_name}
+                        onChange={(e) => setTeacherForm(prev => ({ ...prev, last_name: e.target.value }))}
+                        required
+                      />
+                    </div>
+                    <div className="col-md-6">
+                      <label className="form-label">Phone</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        value={teacherForm.phone}
+                        onChange={(e) => setTeacherForm(prev => ({ ...prev, phone: e.target.value }))}
+                      />
+                    </div>
+                    <div className="col-md-6">
+                      <label className="form-label">Gender</label>
+                      <select
+                        className="form-select"
+                        value={teacherForm.gender}
+                        onChange={(e) => setTeacherForm(prev => ({ ...prev, gender: e.target.value }))}
+                      >
+                        <option value="male">Male</option>
+                        <option value="female">Female</option>
+                      </select>
+                    </div>
+                    <div className="col-md-6">
+                      <label className="form-label">Date of Birth</label>
+                      <input
+                        type="date"
+                        className="form-control"
+                        value={teacherForm.date_of_birth}
+                        onChange={(e) => setTeacherForm(prev => ({ ...prev, date_of_birth: e.target.value }))}
+                      />
+                    </div>
+                    <div className="col-12">
+                      <label className="form-label">Address</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        value={teacherForm.address}
+                        onChange={(e) => setTeacherForm(prev => ({ ...prev, address: e.target.value }))}
+                      />
+                    </div>
+                    <div className="col-12">
+                      <label className="form-label">Teaching Permissions</label>
+                      <div className="row">
+                        <div className="col-md-6">
+                          <div className="form-check">
+                            <input
+                              className="form-check-input"
+                              type="checkbox"
+                              checked={teacherForm.can_teach_male}
+                              onChange={(e) => setTeacherForm(prev => ({ ...prev, can_teach_male: e.target.checked }))}
+                            />
+                            <label className="form-check-label">
+                              Can teach male students
+                            </label>
+                          </div>
+                        </div>
+                        <div className="col-md-6">
+                          <div className="form-check">
+                            <input
+                              className="form-check-input"
+                              type="checkbox"
+                              checked={teacherForm.can_teach_female}
+                              onChange={(e) => setTeacherForm(prev => ({ ...prev, can_teach_female: e.target.checked }))}
+                            />
+                            <label className="form-check-label">
+                              Can teach female students
+                            </label>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="modal-footer">
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setShowAddTeacherModal(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn btn-primary">
+                    Add Teacher
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit School Modal */}
+      {showEditSchoolModal && (
+        <div className="modal show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog modal-lg">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title">Edit School Information</h5>
+                <button
+                  type="button"
+                  className="btn-close"
+                  onClick={() => setShowEditSchoolModal(false)}
+                ></button>
+              </div>
+              <form onSubmit={handleUpdateSchool}>
+                <div className="modal-body">
+                  <div className="row g-3">
+                    <div className="col-md-6">
+                      <label className="form-label">School Name *</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        value={schoolForm.name}
+                        onChange={(e) => setSchoolForm(prev => ({ ...prev, name: e.target.value }))}
+                        required
+                      />
+                    </div>
+                    <div className="col-md-6">
+                      <label className="form-label">State *</label>
+                      <select
+                        className="form-select"
+                        value={schoolForm.state}
+                        onChange={(e) => setSchoolForm(prev => ({ ...prev, state: e.target.value }))}
+                        required
+                      >
+                        <option value="">Select State</option>
+                        {states.map((state) => (
+                          <option key={state} value={state}>
+                            {state}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="col-12">
+                      <label className="form-label">Address *</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        value={schoolForm.address}
+                        onChange={(e) => setSchoolForm(prev => ({ ...prev, address: e.target.value }))}
+                        required
+                      />
+                    </div>
+                    <div className="col-md-6">
+                      <label className="form-label">Phone *</label>
+                      <input
+                        type="text"
+                        className="form-control"
+                        value={schoolForm.phone}
+                        onChange={(e) => setSchoolForm(prev => ({ ...prev, phone: e.target.value }))}
+                        required
+                      />
+                    </div>
+                    <div className="col-md-6">
+                      <label className="form-label">Email *</label>
+                      <input
+                        type="email"
+                        className="form-control"
+                        value={schoolForm.email}
+                        onChange={(e) => setSchoolForm(prev => ({ ...prev, email: e.target.value }))}
+                        required
+                      />
+                    </div>
+                    <div className="col-md-6">
+                      <label className="form-label">Price (DA) *</label>
+                      <input
+                        type="number"
+                        className="form-control"
+                        value={schoolForm.price}
+                        onChange={(e) => setSchoolForm(prev => ({ ...prev, price: parseFloat(e.target.value) }))}
+                        required
+                      />
+                    </div>
+                    <div className="col-12">
+                      <label className="form-label">Description</label>
+                      <textarea
+                        className="form-control"
+                        rows="3"
+                        value={schoolForm.description}
+                        onChange={(e) => setSchoolForm(prev => ({ ...prev, description: e.target.value }))}
+                      ></textarea>
+                    </div>
+                  </div>
+                </div>
+                <div className="modal-footer">
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setShowEditSchoolModal(false)}
+                  >
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn btn-primary">
+                    Update School Info
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Schedule Session Modal */}
       {showSessionModal && (
@@ -690,9 +1176,25 @@ const TeacherDashboard = ({ user, token }) => {
                         required
                       >
                         <option value="">Select Student</option>
-                        {students.map((student) => (
+                        {students.filter(s => s.enrollment_status === 'approved').map((student) => (
                           <option key={student.id} value={student.id}>
                             {student.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="col-md-6">
+                      <label className="form-label">Teacher *</label>
+                      <select
+                        className="form-select"
+                        value={sessionForm.teacher_id}
+                        onChange={(e) => setSessionForm(prev => ({ ...prev, teacher_id: e.target.value }))}
+                        required
+                      >
+                        <option value="">Select Teacher</option>
+                        {teachers.filter(t => t.is_approved).map((teacher) => (
+                          <option key={teacher.id} value={teacher.id}>
+                            {teacher.user_details?.first_name} {teacher.user_details?.last_name}
                           </option>
                         ))}
                       </select>
@@ -711,16 +1213,6 @@ const TeacherDashboard = ({ user, token }) => {
                       </select>
                     </div>
                     <div className="col-md-6">
-                      <label className="form-label">Date & Time *</label>
-                      <input
-                        type="datetime-local"
-                        className="form-control"
-                        value={sessionForm.scheduled_at}
-                        onChange={(e) => setSessionForm(prev => ({ ...prev, scheduled_at: e.target.value }))}
-                        required
-                      />
-                    </div>
-                    <div className="col-md-6">
                       <label className="form-label">Duration (minutes) *</label>
                       <input
                         type="number"
@@ -732,14 +1224,24 @@ const TeacherDashboard = ({ user, token }) => {
                         required
                       />
                     </div>
-                    <div className="col-12">
+                    <div className="col-md-6">
+                      <label className="form-label">Date & Time *</label>
+                      <input
+                        type="datetime-local"
+                        className="form-control"
+                        value={sessionForm.scheduled_at}
+                        onChange={(e) => setSessionForm(prev => ({ ...prev, scheduled_at: e.target.value }))}
+                        required
+                      />
+                    </div>
+                    <div className="col-md-6">
                       <label className="form-label">Location</label>
                       <input
                         type="text"
                         className="form-control"
                         value={sessionForm.location}
                         onChange={(e) => setSessionForm(prev => ({ ...prev, location: e.target.value }))}
-                        placeholder="Enter session location (for park/road sessions)"
+                        placeholder="Enter session location"
                       />
                     </div>
                   </div>
@@ -754,109 +1256,6 @@ const TeacherDashboard = ({ user, token }) => {
                   </button>
                   <button type="submit" className="btn btn-primary">
                     Schedule Session
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Create Video Room Modal */}
-      {showVideoRoomModal && (
-        <div className="modal show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-          <div className="modal-dialog modal-lg">
-            <div className="modal-content">
-              <div className="modal-header">
-                <h5 className="modal-title">Create Online Theory Course</h5>
-                <button
-                  type="button"
-                  className="btn-close"
-                  onClick={() => setShowVideoRoomModal(false)}
-                ></button>
-              </div>
-              <form onSubmit={handleCreateVideoRoom}>
-                <div className="modal-body">
-                  <div className="alert alert-info">
-                    <i className="fas fa-info-circle me-2"></i>
-                    Create an online theory course with video calling to teach students remotely.
-                  </div>
-                  
-                  <div className="row g-3">
-                    <div className="col-md-6">
-                      <label className="form-label">Student *</label>
-                      <select
-                        className="form-select"
-                        value={videoRoomForm.student_id}
-                        onChange={(e) => setVideoRoomForm(prev => ({ ...prev, student_id: e.target.value }))}
-                        required
-                      >
-                        <option value="">Select Student</option>
-                        {students.map((student) => (
-                          <option key={student.id} value={student.id}>
-                            {student.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="col-md-6">
-                      <label className="form-label">Course *</label>
-                      <select
-                        className="form-select"
-                        value={videoRoomForm.course_id}
-                        onChange={(e) => setVideoRoomForm(prev => ({ ...prev, course_id: e.target.value }))}
-                        required
-                      >
-                        <option value="">Select Course</option>
-                        <option value="theory-course-1">Theory Course - Road Signs</option>
-                        <option value="theory-course-2">Theory Course - Traffic Rules</option>
-                        <option value="theory-course-3">Theory Course - Safety Guidelines</option>
-                      </select>
-                    </div>
-                    <div className="col-md-6">
-                      <label className="form-label">Date & Time *</label>
-                      <input
-                        type="datetime-local"
-                        className="form-control"
-                        value={videoRoomForm.scheduled_at}
-                        onChange={(e) => setVideoRoomForm(prev => ({ ...prev, scheduled_at: e.target.value }))}
-                        required
-                      />
-                    </div>
-                    <div className="col-md-6">
-                      <label className="form-label">Duration (minutes) *</label>
-                      <input
-                        type="number"
-                        className="form-control"
-                        value={videoRoomForm.duration_minutes}
-                        onChange={(e) => setVideoRoomForm(prev => ({ ...prev, duration_minutes: parseInt(e.target.value) }))}
-                        min="30"
-                        max="120"
-                        required
-                      />
-                    </div>
-                  </div>
-                  
-                  <div className="mt-4">
-                    <h6 className="fw-bold">What happens next?</h6>
-                    <ul className="list-unstyled">
-                      <li><i className="fas fa-check text-success me-2"></i>A video room will be created using Daily.co</li>
-                      <li><i className="fas fa-check text-success me-2"></i>You and your student will receive the room link</li>
-                      <li><i className="fas fa-check text-success me-2"></i>You can start teaching theory concepts online</li>
-                      <li><i className="fas fa-check text-success me-2"></i>Screen sharing and interactive features available</li>
-                    </ul>
-                  </div>
-                </div>
-                <div className="modal-footer">
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => setShowVideoRoomModal(false)}
-                  >
-                    Cancel
-                  </button>
-                  <button type="submit" className="btn btn-success">
-                    <i className="fas fa-video me-2"></i>Create Video Room
                   </button>
                 </div>
               </form>
