@@ -1301,7 +1301,7 @@ function App() {
     
     // If user is a manager, render the new enhanced ManagerDashboard with 4-button approval system
     if (user?.role === 'manager') {
-      return <NewManagerDashboard user={user} token={token} />;
+      return <EnhancedManagerDashboard user={user} token={token} />;
     }
     
     // If user is a teacher, render the dedicated TeacherDashboard
