@@ -4624,6 +4624,110 @@ async def add_teacher_enhanced(
     
     return serialize_doc(teacher)
 
+@api_router.put("/driving-schools/{school_id}")
+async def update_driving_school(
+    school_id: str,
+    name: str = Form(...),
+    address: str = Form(...),
+    state: str = Form(...),
+    phone: str = Form(...),
+    email: str = Form(...),
+    description: str = Form(""),
+    price: float = Form(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """Update driving school information"""
+    try:
+        if current_user["role"] != "manager":
+            raise HTTPException(status_code=403, detail="Only managers can update school information")
+        
+        # Check if manager owns this school
+        school = await db.driving_schools.find_one({"id": school_id, "manager_id": current_user["id"]})
+        if not school:
+            raise HTTPException(status_code=404, detail="School not found or unauthorized")
+        
+        # Validate state
+        if state not in ALGERIAN_STATES:
+            raise HTTPException(status_code=400, detail="Invalid state")
+        
+        # Update school information
+        update_data = {
+            "name": name,
+            "address": address,
+            "state": state,
+            "phone": phone,
+            "email": email,
+            "description": description,
+            "price": price,
+            "updated_at": datetime.utcnow()
+        }
+        
+        await db.driving_schools.update_one(
+            {"id": school_id},
+            {"$set": update_data}
+        )
+        
+        # Get updated school
+        updated_school = await db.driving_schools.find_one({"id": school_id})
+        
+        return {
+            "message": "School information updated successfully",
+            "school": serialize_doc(updated_school)
+        }
+    
+    except Exception as e:
+        logger.error(f"Update school error: {str(e)}")
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail="Failed to update school information")
+
+@api_router.post("/students/{student_id}/assign-teacher")
+async def assign_student_to_teacher(
+    student_id: str,
+    teacher_id: str = Form(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """Assign a student to a teacher"""
+    try:
+        if current_user["role"] != "manager":
+            raise HTTPException(status_code=403, detail="Only managers can assign students to teachers")
+        
+        # Check if teacher exists and belongs to manager's school
+        school = await db.driving_schools.find_one({"manager_id": current_user["id"]})
+        if not school:
+            raise HTTPException(status_code=404, detail="No school found for this manager")
+        
+        teacher = await db.teachers.find_one({"id": teacher_id, "driving_school_id": school["id"]})
+        if not teacher:
+            raise HTTPException(status_code=404, detail="Teacher not found in your school")
+        
+        # Check if student is enrolled in manager's school
+        enrollment = await db.enrollments.find_one({
+            "student_id": student_id,
+            "driving_school_id": school["id"],
+            "enrollment_status": "approved"
+        })
+        if not enrollment:
+            raise HTTPException(status_code=404, detail="Student not found in your school or not approved")
+        
+        # Update courses to assign teacher
+        await db.courses.update_many(
+            {"enrollment_id": enrollment["id"]},
+            {"$set": {"teacher_id": teacher_id}}
+        )
+        
+        return {
+            "message": "Student assigned to teacher successfully",
+            "student_id": student_id,
+            "teacher_id": teacher_id
+        }
+    
+    except Exception as e:
+        logger.error(f"Assign student to teacher error: {str(e)}")
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail="Failed to assign student to teacher")
+
 # Include the API router
 # NEW APPROVAL SYSTEM: Student endpoint to view enrollment status and rejection reasons
 @api_router.get("/student/enrollment-status")
